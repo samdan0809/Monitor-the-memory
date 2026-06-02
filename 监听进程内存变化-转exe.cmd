@@ -1,0 +1,1 @@
+pyinstaller -F --hidden-import=queue "监听进程内存变化.py"
