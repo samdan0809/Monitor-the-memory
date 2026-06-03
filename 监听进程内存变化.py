@@ -86,35 +86,95 @@ def update_process_tree():
         color = COLORS[idx % len(COLORS)]
         process_tree.insert('', 'end', text=str(pid), values=(info['name'], color))
 
+def get_pid_by_port(port):
+    """根据端口号获取正在监听的进程PID"""
+    try:
+        for conn in psutil.net_connections(kind='inet'):
+            # 只查找 LISTENING 状态的连接
+            if conn.status == psutil.CONN_LISTEN and conn.laddr.port == port and conn.pid is not None:
+                return conn.pid
+        return None
+    except psutil.AccessDenied:
+        messagebox.showwarning("警告", "需要管理员权限才能获取监听端口信息")
+        return None
+    except Exception as e:
+        print(f"获取端口进程失败: {e}")
+        return None
+
 def add_process_ui():
-    pid_str = simpledialog.askstring("添加进程", "请输入进程PID:")
-    if not pid_str:
-        return
-    try:
-        pid = int(pid_str)
-    except ValueError:
-        messagebox.showerror("错误", "PID必须是数字")
-        return
+    # 创建自定义对话框
+    dialog = tk.Toplevel(root)
+    dialog.title("添加进程")
+    dialog.geometry("300x200")
+    dialog.transient(root)
+    dialog.grab_set()
     
-    with lock:
-        if pid in processes:
-            messagebox.showwarning("警告", f"进程 {pid} 已在监控中")
+    ttk.Label(dialog, text="选择添加方式:").pack(pady=10)
+    
+    var = tk.IntVar(value=1)
+    
+    def on_radio_change():
+        entry.focus()
+    
+    ttk.Radiobutton(dialog, text="通过 PID 添加", variable=var, value=1, command=on_radio_change).pack(anchor="w", padx=20)
+    ttk.Radiobutton(dialog, text="通过 端口号 添加", variable=var, value=2, command=on_radio_change).pack(anchor="w", padx=20)
+    
+    ttk.Label(dialog, text="输入值:").pack(pady=5)
+    entry = ttk.Entry(dialog, width=20)
+    entry.pack(pady=5)
+    entry.focus()
+    
+    def on_ok():
+        value = entry.get().strip()
+        if not value:
+            messagebox.showerror("错误", "请输入值")
             return
-    
-    try:
-        p = psutil.Process(pid)
-        proc_name = p.name()
+        
+        try:
+            if var.get() == 1:
+                # 通过PID
+                pid = int(value)
+            else:
+                # 通过端口号
+                port = int(value)
+                pid = get_pid_by_port(port)
+                if pid is None:
+                    messagebox.showerror("错误", f"未找到占用端口 {port} 的进程")
+                    return
+                messagebox.showinfo("提示", f"端口 {port} 对应的进程PID: {pid}")
+        except ValueError:
+            messagebox.showerror("错误", "请输入数字")
+            return
+        
         with lock:
-            processes[pid] = {'proc': p, 'name': proc_name, 'data': deque(maxlen=MAX_DISPLAY)}
+            if pid in processes:
+                messagebox.showwarning("警告", f"进程 {pid} 已在监控中")
+                dialog.destroy()
+                return
         
-        t = threading.Thread(target=monitor_process, args=(pid,), daemon=True)
-        t.start()
-        
-        update_process_tree()
-        if status_label:
-            status_label.config(text=f"✅ 已添加: {proc_name} (PID:{pid})")
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        messagebox.showerror("错误", f"无法访问进程 {pid}")
+        try:
+            p = psutil.Process(pid)
+            proc_name = p.name()
+            with lock:
+                processes[pid] = {'proc': p, 'name': proc_name, 'data': deque(maxlen=MAX_DISPLAY)}
+            
+            t = threading.Thread(target=monitor_process, args=(pid,), daemon=True)
+            t.start()
+            
+            update_process_tree()
+            if status_label:
+                status_label.config(text=f"✅ 已添加: {proc_name} (PID:{pid})")
+            dialog.destroy()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            messagebox.showerror("错误", f"无法访问进程 {pid}")
+    
+    def on_cancel():
+        dialog.destroy()
+    
+    btn_frame = ttk.Frame(dialog)
+    btn_frame.pack(pady=10)
+    ttk.Button(btn_frame, text="确定", command=on_ok).pack(side="left", padx=10)
+    ttk.Button(btn_frame, text="取消", command=on_cancel).pack(side="right", padx=10)
 
 def remove_process_ui():
     selected = process_tree.selection()
