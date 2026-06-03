@@ -17,7 +17,7 @@ plt.rcParams["axes.unicode_minus"] = False
 
 # ===================== 启动菜单 =====================
 print("=" * 55)
-print("        进程内存监控｜双图实时显示 + Y轴自动缩放")
+print("        进程内存监控｜双图实时显示")
 print("=" * 55)
 
 full_data = []
@@ -69,6 +69,64 @@ if full_data:
 
 start_time = time.time()
 
+# ===================== 曲线平滑函数 =====================
+def smooth_curve(x_values, y_values, max_points=300):
+    """
+    平滑曲线，保留最高点和最低点，中间值做降采样
+    :param x_values: x坐标列表
+    :param y_values: y坐标列表
+    :param max_points: 最大保留点数
+    :return: 平滑后的 (xs, ys)
+    """
+    if len(y_values) <= max_points:
+        return x_values, y_values
+    
+    # 1. 识别所有局部极值点
+    key_indices = {0, len(y_values) - 1}  # 保留首尾
+    
+    for i in range(1, len(y_values) - 1):
+        prev_val = y_values[i-1]
+        curr_val = y_values[i]
+        next_val = y_values[i+1]
+        # 局部最高点或最低点
+        if (curr_val > prev_val and curr_val > next_val) or (curr_val < prev_val and curr_val < next_val):
+            key_indices.add(i)
+    
+    # 2. 如果极值点太多，进行二次筛选
+    key_list = sorted(key_indices)
+    if len(key_list) > max_points:
+        # 均匀采样极值点
+        step = len(key_list) // max_points
+        key_list = key_list[::step]
+    
+    # 3. 如果极值点太少，补充一些点
+    if len(key_list) < max_points // 2:
+        # 在极值点之间均匀补充点
+        new_key_list = [key_list[0]]
+        for i in range(1, len(key_list)):
+            prev = key_list[i-1]
+            curr = key_list[i]
+            gap = curr - prev
+            if gap > 10:  # 间隔太大时补充点
+                num_insert = min(gap // 5, 3)
+                for j in range(1, num_insert + 1):
+                    new_key_list.append(prev + (gap * j) // (num_insert + 1))
+            new_key_list.append(curr)
+        key_list = new_key_list
+    
+    # 4. 确保不超过最大点数
+    if len(key_list) > max_points:
+        step = len(key_list) // max_points
+        key_list = key_list[::step]
+    
+    # 5. 提取结果
+    key_list = sorted(set(key_list))  # 去重并排序
+    smooth_x = [x_values[i] for i in key_list]
+    smooth_y = [y_values[i] for i in key_list]
+    
+    return smooth_x, smooth_y
+
+
 # ===================== 双图布局 =====================
 fig = plt.figure(figsize=(15, 6))
 
@@ -82,7 +140,7 @@ line_left, = ax_left.plot([], [], lw=2.5, color="#3498db")
 
 # 右图：完整历史内存（全量）
 ax_right = fig.add_subplot(1, 2, 2)
-ax_right.set_title("📊 完整内存历史曲线", fontsize=13)
+ax_right.set_title("📊 完整内存历史曲线（平滑）", fontsize=13)
 ax_right.set_xlabel("总时间轴（秒）")
 ax_right.set_ylabel("内存占用 (MB)")
 ax_right.grid(alpha=0.3)
@@ -133,10 +191,13 @@ def update(frame):
     line_left.set_data(left_xs, left_ys)
     update_axis_limits(ax_left, left_xs, left_ys)
 
-    # ---------- 更新右图：完整历史 ----------
+    # ---------- 更新右图：完整历史（平滑处理） ----------
     right_xs = list(range(len(full_data)))
     right_ys = [v for _, v in full_data]
-    line_right.set_data(right_xs, right_ys)
+    
+    # 对数据进行平滑，保留最高点和最低点
+    smooth_x, smooth_y = smooth_curve(right_xs, right_ys, max_points=300)
+    line_right.set_data(smooth_x, smooth_y)
     update_axis_limits(ax_right, right_xs, right_ys)
 
     return line_left, line_right
