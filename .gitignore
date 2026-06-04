@@ -2,3 +2,4 @@ data.csv
 build/
 dist/
 *.log
+alert_config.json
