@@ -136,7 +136,9 @@ def update_process_tree():
         process_tree.delete(item)
     for idx, (pid, info) in enumerate(processes.items()):
         color = COLORS[idx % len(COLORS)]
-        process_tree.insert('', 'end', text=str(pid), values=(info['name'], color))
+        port = info.get('port')
+        display = f"{pid}:{port}" if port else str(pid)
+        process_tree.insert('', 'end', text=display, values=(info['name'], color))
 
 def get_pid_by_port(port):
     """根据端口号获取所有正在监听的本机进程列表"""
@@ -219,6 +221,7 @@ def add_process_ui():
     
     def on_ok():
         value = entry.get().strip()
+        added_port = None
         if not value:
             messagebox.showerror("错误", "请输入值")
             return
@@ -230,6 +233,7 @@ def add_process_ui():
             else:
                 # 通过端口号
                 port = int(value)
+                added_port = port
                 processes_list = get_pid_by_port(port)
                 if not processes_list:
                     messagebox.showerror("错误", f"未找到监听端口 {port} 的进程")
@@ -291,7 +295,7 @@ def add_process_ui():
             p = psutil.Process(pid)
             proc_name = p.name()
             with lock:
-                processes[pid] = {'proc': p, 'name': proc_name, 'data': deque(maxlen=MAX_DISPLAY)}
+                processes[pid] = {'proc': p, 'name': proc_name, 'data': deque(maxlen=MAX_DISPLAY), 'port': added_port}
             
             t = threading.Thread(target=monitor_process, args=(pid,), daemon=True)
             t.start()
@@ -318,7 +322,13 @@ def remove_process_ui():
         return
     
     item = selected[0]
-    pid = int(process_tree.item(item, 'text'))
+    # 进程项可能显示为 "pid:port" 或仅 "pid"
+    pid_text = process_tree.item(item, 'text')
+    try:
+        pid = int(str(pid_text).split(':')[0])
+    except Exception:
+        messagebox.showwarning("警告", "无法解析选中的进程 PID")
+        return
     
     proc_name = None
     with lock:
@@ -687,7 +697,7 @@ if __name__ == "__main__":
 
     ttk.Label(left_frame, text="监控进程列表:").pack(anchor="w", padx=5)
     process_tree = ttk.Treeview(left_frame, columns=('name', 'color'), show='tree headings')
-    process_tree.heading('#0', text='PID')
+    process_tree.heading('#0', text='PID:端口')
     process_tree.heading('name', text='进程名')
     process_tree.heading('color', text='颜色')
     process_tree.column('#0', width=80)
@@ -710,9 +720,10 @@ if __name__ == "__main__":
     right_frame = ttk.Frame(root)
     right_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-    fig = plt.figure(figsize=(10, 6))
-    ax_left = fig.add_subplot(1, 2, 1)
-    ax_right = fig.add_subplot(1, 2, 2)
+    fig = plt.figure(figsize=(10, 8))
+    ax_left = fig.add_subplot(2, 1, 1)
+    ax_right = fig.add_subplot(2, 1, 2)
+    fig.tight_layout(pad=3.0)
 
     canvas = FigureCanvasTkAgg(fig, master=right_frame)
     canvas.draw()
